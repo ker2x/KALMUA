@@ -44,7 +44,7 @@ But i'm not familliar with directX so Claude Opus 4.7 helped me (read throught t
 
 No, it use the LMU SharedMemoryInterface from Studio 397 official SDK. See: 
 - https://lemansultimate.com/le-mans-ultimate-releases-v1-3-update-with-final-elms-content-performance-updates/
-- <your LMU install path>\Support\SharedMemoryInterface (copied in this repo for version consistancy but i'll have to keep it up to date)
+- (your LMU install path)/Support/SharedMemoryInterface/ (copied in this repo for version consistancy but i'll have to keep it up to date)
 
 ### The sound is horrible.
 
