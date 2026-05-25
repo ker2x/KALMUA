@@ -4,4 +4,3 @@ build/
 CMakeUserPresets.json
 *.user
 .claude/
-.vs/
