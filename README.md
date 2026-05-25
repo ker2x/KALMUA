@@ -1,11 +1,10 @@
 # KALMUA
 
-## READ THIS FIRST /!\
 
-- **IT'S NOT TELEMETRY BASED FFB ! It passthrough the FFB data from the game to the wheel and only scale it per car based on the config.** So there is no latency or stuttering like with telemetry based FFB.
 - This small cmdline app for LMU allow you to map FFB scaling to a steering wheel button/rotary encoder. (like in iRacing)
 - It also allows you to save FFB scaling per car and load it when you select the car in LMU. (like in iRacing)
 - Optionally, it add audio cue when ABS or TC trigger. If the car have no ABS or TC then it won't do anything. (like some other plugins (eg: TinyPedal) that add visual cue but I prefer audio cue)
+- **IT'S NOT TELEMETRY BASED FFB ! It passthrough the FFB data from the game to the wheel and only scale it per car based on the config.** So there is no latency or stuttering like with telemetry based FFB.
 
 ## WARNING & SAFETY: "Invert Force Feedback" setting in LMU
 
@@ -15,7 +14,7 @@ Here is the issue:
 - The telemetry data from LMU does not include the "Invert Force Feedback" data.
 - So the app receive the same FFB data from the game regardless of the "Invert Force Feedback" setting in LMU.
 - As the app is just a passthrough with scaling, it will scale the FFB data and send it to the wheel.
-- If your wheelbase requires you to invert the FFB in LMU, the app will not invert it by default and you will get the FFB in the wrong direction.
+- If your wheelbase requires you to invert the FFB in LMU, the app will not invert it by default and **you will get the FFB in the wrong direction.** (wild oscillations, injury, it happened even to the best of us)
 - See "how to use" below to handle this frustrating issue. (my wheelbase require FFB Inversion)
 
 
