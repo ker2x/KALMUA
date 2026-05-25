@@ -240,6 +240,14 @@ int run_passthrough() {
     const bool tc_sound_enabled =
         GetPrivateProfileIntA("settings", "tc_sound",  1, ini.c_str()) != 0;
 
+    // [settings] invert_ffb — see project_ffb_sign_convention.md. The Invicta
+    // wheelbase needs the shared-memory FFB value negated to feel right; other
+    // wheels may not. Default to 1 (invert) since that's the value the project
+    // was built and tuned on. Flip to 0 if your wheel pushes the wrong way.
+    const bool invert_ffb =
+        GetPrivateProfileIntA("settings", "invert_ffb", 1, ini.c_str()) != 0;
+    const float ffb_sign = invert_ffb ? -1.0f : 1.0f;
+
     // Try to acquire the bindings input device. Failure is non-fatal — FFB
     // still works, you just can't tune scale live.
     Di8Device input_dev;
@@ -317,8 +325,9 @@ int run_passthrough() {
         ++ticks;
 
         // See project_ffb_sign_convention.md: LMU's "Invert FFB" UI toggle
-        // does not affect the value in shared memory; negate to match the wheel.
-        float out = std::clamp(-v * scale, -1.0f, 1.0f);
+        // does not affect the value in shared memory. Sign comes from the INI
+        // [settings] invert_ffb knob (default -1 for Invicta-style wheels).
+        float out = std::clamp(ffb_sign * v * scale, -1.0f, 1.0f);
         if (!dev.set_force(out)) ++lost;
 
         auto now = clock::now();
@@ -561,10 +570,21 @@ int run_setup() {
             WritePrivateProfileStringA("settings", key, val, ini.c_str());
         }
     };
-    seed_if_absent("abs_sound", "1");
-    seed_if_absent("tc_sound",  "1");
+    seed_if_absent("abs_sound",  "0");
+    seed_if_absent("tc_sound",   "0");
+    seed_if_absent("invert_ffb", "0");
 
     std::printf("Saved to %s\n", ini.c_str());
+
+    std::printf("\n");
+    std::printf("************************************************************\n");
+    std::printf("*                       !! IMPORTANT !!                    *\n");
+    std::printf("*                                                          *\n");
+    std::printf("*  READ THE README REGARDING THE \"Invert Force Feedback\"   *\n");
+    std::printf("*  SETTING OR IT WILL HURT IF NOT SET PROPERLY.            *\n");
+    std::printf("*                                                          *\n");
+    std::printf("************************************************************\n");
+    std::printf("\n");
 
     return 0;
 }
