@@ -1,3 +1,4 @@
 KALMUA
 Copyright 2026 - Laurent "ker2x" Laborde
-This product includes software developed by ker2x (https://github.com/ker2x/KALMUA).
+This product includes code developed by ker2x (https://github.com/ker2x/KALMUA).
+This product includes code (SharedMemoryInterface) developed by Studio 397 Copyright (c) 2025 Studio 397 BV and Motorsport Games Inc.
