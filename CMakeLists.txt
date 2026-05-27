@@ -19,6 +19,8 @@ add_executable(KALMUA
     src/main.cpp
     src/ffb/di8_device.cpp
     src/ffb/di8_device.hpp
+    src/util/win32_util.cpp
+    src/util/win32_util.hpp
     src/SharedMemoryInterface/SharedMemoryInterface.hpp
     src/SharedMemoryInterface/InternalsPlugin.hpp
     src/SharedMemoryInterface/PluginObjects.hpp

@@ -5,6 +5,7 @@
 
 #include "ffb/di8_device.hpp"
 #include "SharedMemoryInterface/SharedMemoryInterface.hpp"
+#include "util/win32_util.hpp"
 
 #include <algorithm>
 #include <array>
@@ -18,107 +19,18 @@
 #include <thread>
 #include <utility>
 
-#include <conio.h>  
+#include <conio.h>
 
 namespace {
 
-// Don't ask.
-std::string to_utf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    int n = WideCharToMultiByte(
-        CP_UTF8, 0, w.data(), static_cast<int>(w.size()),
-        nullptr, 0, nullptr, nullptr);
-    std::string s(static_cast<size_t>(n), '\0');
-    WideCharToMultiByte(
-        CP_UTF8, 0, w.data(), static_cast<int>(w.size()),
-        s.data(), n, nullptr, nullptr);
-    return s;
-}
-
-// Yet another thing I don't understand about Windows. Nice intro to my code isn't it ?
-// GUID <-> string round-trip in the canonical "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}" form, matching what Win32 produces. 
-// As long as it works i guess. I don't want to mess with it.
-std::string guid_to_string(const GUID& g) {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf),
-        "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-        static_cast<unsigned long>(g.Data1),
-        static_cast<unsigned int>(g.Data2),
-        static_cast<unsigned int>(g.Data3),
-        g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
-        g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
-    return buf;
-}
-
-// Same thing in reverse. Returns false if the string is not in the correct format.
-// I just needed something for the ini file. And this is what I got.
-bool parse_guid(const char* s, GUID& g) {
-    unsigned long d1 = 0;
-    unsigned int  d2 = 0, d3 = 0;
-    unsigned int  d4[8] = {};
-    int n = sscanf_s(s, "{%8lx-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x}",
-                     &d1, &d2, &d3,
-                     &d4[0], &d4[1], &d4[2], &d4[3],
-                     &d4[4], &d4[5], &d4[6], &d4[7]);
-    if (n != 11) return false;
-    g.Data1 = d1;
-    g.Data2 = static_cast<unsigned short>(d2);
-    g.Data3 = static_cast<unsigned short>(d3);
-    for (int i = 0; i < 8; ++i) g.Data4[i] = static_cast<unsigned char>(d4[i]);
-    return true;
-}
-
-// Resolve "<exe-directory>\KALMUA.ini". WritePrivateProfileString needs an absolute path, otherwise it falls back to the Windows directory.
-// Don't mess with the windows directory, that's just asking for trouble. 
-// And yes, GetModuleFileName is the recommended way to get the exe path. 
-// I'll trust billions of hours of developer's headaches all over the world for this. Especially over my own understanding of Windows internals, which is approximately zero.
-std::string ini_path() {
-    char buf[MAX_PATH] = {};
-    DWORD dir = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    std::string path(buf, dir);
-    auto slash = path.find_last_of("\\/");
-    if (slash != std::string::npos) path.erase(slash + 1);
-    path += "KALMUA.ini"; // heh ... 
-    return path;
-}
-
-// Minimal RAII wrappers
-struct ScopedHandle {
-    HANDLE h = nullptr;
-    ~ScopedHandle() { if (h) CloseHandle(h); }
-    explicit operator bool() const { return h != nullptr; }
-};
-struct ScopedMappedView {
-    const void* p = nullptr;
-    ~ScopedMappedView() { if (p) UnmapViewOfFile(p); }
-    explicit operator bool() const { return p != nullptr; }
-};
-struct ScopedHwnd {
-    HWND h = nullptr;
-    ~ScopedHwnd() { if (h) DestroyWindow(h); }
-    explicit operator bool() const { return h != nullptr; }
-};
-
-// DI8 wants a real top-level HWND that this process owns. GetConsoleWindow()
-// under Windows Terminal hands back a conhost stub DI8 rejects at Acquire()
-// time with ERROR_INVALID_WINDOW_HANDLE.
-HWND create_hidden_owner_window() {
-    static const wchar_t kClass[] = L"KALMUA_DI8_Owner";
-    HINSTANCE h = GetModuleHandleW(nullptr);
-
-    WNDCLASSEXW wc = {};
-    wc.cbSize        = sizeof(wc);
-    wc.lpfnWndProc   = DefWindowProcW;
-    wc.hInstance     = h;
-    wc.lpszClassName = kClass;
-    RegisterClassExW(&wc); // benign if already registered
-
-    return CreateWindowExW(
-        0, kClass, L"KALMUA",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 100, 100,
-        nullptr, nullptr, h, nullptr);
-}
+using kalmua::util::to_utf8;
+using kalmua::util::guid_to_string;
+using kalmua::util::parse_guid;
+using kalmua::util::ini_path;
+using kalmua::util::create_hidden_owner_window;
+using kalmua::util::ScopedHandle;
+using kalmua::util::ScopedMappedView;
+using kalmua::util::ScopedHwnd;
 
 // The SDK exposes shared mapping "LMU_Data" and event "LMU_Data_Event".
 // We only read a single float (FFBTorque) — that's atomic on x64, so the SDK's SharedMemoryLock isn't needed here. 
@@ -146,7 +58,7 @@ int run_passthrough() {
 	// If LMU is running but theses fail, the hpp files i grabbed from the SDK are probably out of date. 
     // In that case, I'll need to update them, but the user won't be able to do anything about it.
     if (!hEvent || !hMap) {
-        std::printf("Could not open '%s' / '%s' — is LMU running?\n",
+        std::printf("Could not open '%s' / '%s' — is LMU running? If it is, are plugins enabled ?\n",
                     LMU_SHARED_MEMORY_FILE, LMU_SHARED_MEMORY_EVENT);
         return 0;
     }
@@ -171,15 +83,17 @@ int run_passthrough() {
         return 0;
     }
 
-    // Try to honor the FFB device picked during setup. If the INI has a guid
-    // and it matches an enumerated device, use it silently. Otherwise fall
-    // back to the legacy prompt (which auto-picks when there's only one).
+    // Honor the FFB device picked during setup. Setup is the single source
+    // of truth for which wheelbase to drive -- no interactive fallback, no
+    // implicit auto-pick. If the INI's guid doesn't resolve to an enumerated
+    // device (missing key, device unplugged, hardware changed), fail and
+    // point the user at setup.
     const std::string ini = ini_path();
     char ffb_guid_buf[64] = {};
     GetPrivateProfileStringA("bindings", "ffb_device_guid", "",
                              ffb_guid_buf, sizeof(ffb_guid_buf), ini.c_str());
-    size_t choice    = 0;
-    bool   resolved  = false;
+    size_t choice = 0;
+    bool   resolved = false;
     GUID   ffb_pref{};
     if (parse_guid(ffb_guid_buf, ffb_pref)) {
         for (size_t i = 0; i < devices.size(); ++i) {
@@ -190,17 +104,11 @@ int run_passthrough() {
             }
         }
     }
-    if (!resolved && devices.size() > 1) {
-        std::printf("FFB devices:\n");
-        for (size_t i = 0; i < devices.size(); ++i) {
-            std::printf("  [%zu] %s\n", i, to_utf8(devices[i].product_name).c_str());
-        }
-        std::printf("Pick [0-%zu]: ", devices.size() - 1);
-        std::fflush(stdout);
-        if (scanf_s("%zu", &choice) != 1 || choice >= devices.size()) {
-            std::printf("Invalid choice.\n");
-            return 1;
-        }
+    if (!resolved) {
+        std::printf("FFB device from setup not found among the %zu enumerated device(s).\n",
+                    devices.size());
+        std::printf("Run 'KALMUA setup' to (re)select your wheelbase.\n");
+        return 1;
     }
 
     ScopedHwnd hwnd{ create_hidden_owner_window() };
@@ -297,7 +205,6 @@ int run_passthrough() {
     float         observed_max = -std::numeric_limits<float>::infinity();
     double        sum_abs      = 0.0;
     std::uint64_t ticks        = 0;
-    std::uint64_t timeouts     = 0;
     std::uint64_t lost         = 0; // ticks where set_force failed
 
     // Live scale tuning via the bound buttons. Step loaded from INI above.
@@ -306,19 +213,22 @@ int run_passthrough() {
     // Cache the player's current car model so we only hit the INI on change.
     char current_car[64] = {};
 
+    float prev_ffb = 0.0f;
+
+    /* ********* CRITICAL LOOP ********* */
     while (true) {
-        // 50 ms wait so the loop still progresses if LMU stops firing events.
-        DWORD wr = WaitForSingleObject(hEvent.h, 50);
-        if (wr == WAIT_TIMEOUT) {
-            ++timeouts;
+        float v = pBuf->data.generic.FFBTorque;
+        // Poll FFBTorque directly instead of waiting on LMU_Data_Event. 
+        // Per measurement, LMU writes FFBTorque at 100 Hz but only
+        // signals the event at ~50 Hz. Still not 400hz, but better than 50hz.
+        if (v == prev_ffb) {
+            // Cooperative busy loop : hint the CPU that this thread voluntarily gives up its current time slice, allowing other threads to run. (better than sleep())
+            // On my crappy PC, while LMU is running, this loop run at ~30Khz with 2.5% CPU usage. 
+            std::this_thread::yield();
             continue;
         }
-        if (wr != WAIT_OBJECT_0) {
-            std::printf("WaitForSingleObject failed (wr=%lu, GLE=%lu).\n", wr, GetLastError());
-            break;
-        }
+        prev_ffb = v;
 
-        float v = pBuf->data.generic.FFBTorque;
         if (v < observed_min) observed_min = v;
         if (v > observed_max) observed_max = v;
         sum_abs += std::fabs(v);
@@ -393,11 +303,10 @@ int run_passthrough() {
         if (now - last_log >= std::chrono::seconds(1)) {
             last_log = now;
             float t_s = std::chrono::duration<float>(now - start).count();
-            std::printf("  t=%5.1fs  src=% .4f  out=% .4f   range=[% .4f, % .4f]  mean|src|=%.4f  ticks=%llu  timeouts=%llu  lost=%llu\n",
+            std::printf("  t=%5.1fs  src=% .4f  out=% .4f   range=[% .4f, % .4f]  mean|src|=%.4f  ticks=%llu  lost=%llu\n",
                         t_s, v, out, observed_min, observed_max,
                         ticks ? sum_abs / static_cast<double>(ticks) : 0.0,
                         static_cast<unsigned long long>(ticks),
-                        static_cast<unsigned long long>(timeouts),
                         static_cast<unsigned long long>(lost));
         }
     }
@@ -407,9 +316,8 @@ int run_passthrough() {
 
     std::printf("\nDone.\n");
     std::printf("  Source range: [% .5f, % .5f]\n", observed_min, observed_max);
-    std::printf("  Ticks:        %llu  (timeouts: %llu, lost: %llu)\n",
+    std::printf("  Ticks:        %llu  (lost: %llu)\n",
                 static_cast<unsigned long long>(ticks),
-                static_cast<unsigned long long>(timeouts),
                 static_cast<unsigned long long>(lost));
     std::printf("  Mean |src|:   %.5f\n",
                 ticks ? sum_abs / static_cast<double>(ticks) : 0.0);
@@ -594,6 +502,7 @@ void print_usage(const char* argv0) {
     std::printf("Usage:\n");
     std::printf("  %s        run FFB (auto-runs setup on first run)\n", argv0);
     std::printf("  %s setup  (re-)capture wheel buttons\n", argv0);
+    std::printf("  %s probe  measure rF2SMMP FFB buffer update rate\n", argv0);
 }
 
 } // namespace
